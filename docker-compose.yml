@@ -55,7 +55,7 @@ services:
   # FastAPI (IA / ML Core)
   # ============================
   fastapi-ml:
-    image: python:3.11-slim
+    build: ./fastapi-ml
     container_name: ia-core
     restart: always
     env_file:
@@ -63,11 +63,8 @@ services:
     working_dir: /app
     volumes:
       - ./fastapi-ml:/app
-    command: >
-      sh -c "
-      pip install --no-cache-dir -r requirements.txt &&
-      uvicorn main_new:app --host 0.0.0.0 --port 8000 --reload
-      "
+      - ./scripts:/scripts
+      - ./consumos_uptc_hackday:/data
     environment:
       DB_HOST: postgres
       DB_PORT: 5432

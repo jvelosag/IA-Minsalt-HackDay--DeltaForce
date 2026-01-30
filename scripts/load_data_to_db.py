@@ -7,8 +7,8 @@ import os
 from dotenv import load_dotenv
 
 # --- Configuration ---
-SEDES_CSV_PATH = "consumos_uptc_hackday/sedes_uptc.csv"
-CONSUMOS_CSV_PATH = "consumos_uptc_hackday/consumos_uptc.csv"
+SEDES_CSV_PATH = "/data/sedes_uptc.csv"
+CONSUMOS_CSV_PATH = "/data/consumos_uptc.csv"
 
 def get_db_connection():
     """Establishes and returns a database connection."""

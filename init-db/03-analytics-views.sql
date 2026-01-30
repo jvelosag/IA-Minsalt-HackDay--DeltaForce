@@ -146,5 +146,39 @@ ORDER BY
     s.sede,
     c.periodo_academico;
 
+-- ============================
+-- 4. Vista de Comparación de Predicciones
+-- Une el consumo real (en formato largo) con las predicciones generadas.
+-- Esta es la vista principal para los dashboards de "Real vs. Predicho".
+-- ============================
+CREATE OR REPLACE VIEW analytics.predictions_comparison AS
+WITH consumo_largo AS (
+    -- Desanchoar (unpivot) la tabla de consumo
+    SELECT c.timestamp, c.sede_id, 'Comedores' AS sector, c.energia_comedor_kwh AS consumo_real FROM raw_data.consumo c UNION ALL
+    SELECT c.timestamp, c.sede_id, 'Salones' AS sector, c.energia_salones_kwh AS consumo_real FROM raw_data.consumo c UNION ALL
+    SELECT c.timestamp, c.sede_id, 'Laboratorios' AS sector, c.energia_laboratorios_kwh AS consumo_real FROM raw_data.consumo c UNION ALL
+    SELECT c.timestamp, c.sede_id, 'Auditorios' AS sector, c.energia_auditorios_kwh AS consumo_real FROM raw_data.consumo c UNION ALL
+    SELECT c.timestamp, c.sede_id, 'Oficinas' AS sector, c.energia_oficinas_kwh AS consumo_real FROM raw_data.consumo c
+)
+SELECT
+    cl.timestamp,
+    cl.sede_id,
+    s.sede,
+    cl.sector,
+    cl.consumo_real,
+    p.consumo_predicho,
+    (cl.consumo_real - p.consumo_predicho) AS diferencia,
+    p.modelo,
+    p.created_at AS prediction_timestamp
+FROM consumo_largo cl
+JOIN raw_data.sedes s ON cl.sede_id = s.sede_id
+LEFT JOIN analytics.predictions p
+    ON cl.sede_id = p.sede_id
+    AND cl.sector = p.sector
+    AND cl.timestamp = p.timestamp
+WHERE
+    cl.consumo_real IS NOT NULL;
+
+
 -- Grant permissions for all views to the user
 GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO energy_user;
