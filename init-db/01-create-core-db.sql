@@ -1,0 +1,2 @@
+CREATE DATABASE core_db;
+GRANT ALL PRIVILEGES ON DATABASE core_db TO energy_user;
