@@ -33,20 +33,22 @@ services:
     image: n8nio/n8n:latest
     container_name: n8n
     restart: always
-    env_file:
-      - .env
     ports:
       - "5678:5678"
     environment:
-      DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB_N8N}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
-      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB_N8N}
+      - DB_POSTGRESDB_USER=${POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_BLOCK_FS_READ_ACCESS=false
+      - N8N_BLOCK_FS_WRITE_ACCESS=false
+      - N8N_SKIP_WEBHOOK_READ_CHECK=true
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,6 +75,7 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "8000:8000"
+    command: uvicorn main_new:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       postgres:
         condition: service_healthy
