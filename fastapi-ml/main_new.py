@@ -17,8 +17,14 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, mean_squared_error, accuracy_score, precision_score, recall_score, f1_score
-
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+)
 # Load environment variables
 load_dotenv()
 
@@ -179,6 +185,15 @@ class AnomalyPredictionResponse(BaseModel):
     is_inefficient: bool
     inefficiency_score: float # Probability of being inefficient
     model_version: str
+
+# --- Request/Response Models for Recommendation Generation ---
+class GenerateRecommendationResponse(BaseModel):
+    message: str
+    recommendation_id: int
+    anomaly_id: int
+    accion: str
+    ahorro_estimado: Optional[float]
+    explicacion: Optional[str]
 
 
 # --- Phase 1: Predictive Modeling ---
@@ -406,8 +421,7 @@ def train_inefficiency_detector_endpoint(request: AnomalyDetectorTrainRequest):
         df_copy['rolling_mean'] = df_copy.groupby(['sede_id', 'dia_semana', 'hora'])[target_column_prefix].transform('mean')
         df_copy['rolling_std'] = df_copy.groupby(['sede_id', 'dia_semana', 'hora'])[target_column_prefix].transform('std').fillna(0) # Fill NaN for single observations
 
-        # Define inefficiency: actual consumption > (mean + std_dev_multiplier * std_dev)
-        # We also ensure consumption is positive to avoid flagging zero consumption as inefficient
+        # Define inefficiency: actual consumption > (mean + std_dev_multiplier * df_copy['rolling_std'])) & (df_copy[target_column_prefix] > 0)).astype(int)
         df_copy['is_inefficient'] = ((df_copy[target_column_prefix] > (df_copy['rolling_mean'] + request.std_dev_multiplier * df_copy['rolling_std'])) & (df_copy[target_column_prefix] > 0)).astype(int)
 
         # Drop temporary columns used for labeling
@@ -557,7 +571,7 @@ def predict_inefficiency_endpoint(sede_id: str, sector_or_total: str, request: A
                 # If there's a corresponding predictive model, we could use its prediction here for comparison.
                 # Since we don't have that directly linked in this endpoint, let's keep it simple.
                 # For a more robust solution, the predictive model's output could be part of the request context.
-                impact_kwh_placeholder = actual_consumption * 0.1 # Example: 10% of actual consumption as impact
+                impact_kwh_placeholder = float(actual_consumption) * 0.1 # Example: 10% of actual consumption as impact
 
             cur.execute(
                 """
@@ -585,3 +599,117 @@ def predict_inefficiency_endpoint(sede_id: str, sector_or_total: str, request: A
     finally:
         if conn:
             conn.close()
+
+
+# --- Phase 3: Recommendation Engine ---
+def _create_recommendation_logic(anomaly: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generates a recommendation based on a rule-based system.
+    Input: Anomaly details from the database.
+    Output: A dictionary with recommendation details.
+    """
+    sector = anomaly["sector"]
+    anomaly_type = anomaly["tipo"]
+    timestamp = anomaly["timestamp"]
+    impact = float(anomaly.get("impacto_kwh", 0.0) or 0.0)
+
+    # Default recommendation
+    rec = {
+        "accion": "Investigar la causa del consumo energético elevado.",
+        "explicacion": f"Se ha detectado una anomalía de tipo '{anomaly_type}' en el sector '{sector}'. Se recomienda una inspección para identificar la fuente.",
+        "ahorro_estimado": impact * 0.3,
+        "confianza": 0.6
+    }
+
+    if anomaly_type == "Ineficiencia por Alto Consumo":
+        is_weekend = timestamp.weekday() >= 5
+        hour = timestamp.hour
+
+        if sector == "Salones" and (hour < 7 or hour > 22 or is_weekend):
+            rec = {
+                "accion": "Apagar luces y equipos en salones no utilizados.",
+                "explicacion": "Se detectó un consumo energético elevado en los salones fuera del horario académico habitual o durante el fin de semana. Es probable que luces o equipos hayan quedado encendidos.",
+                "ahorro_estimado": impact * 0.8,
+                "confianza": 0.9
+            }
+        elif sector == "Oficinas" and (hour > 18 or hour < 8 or is_weekend):
+            rec = {
+                "accion": "Verificar y apagar equipos de oficina y climatización.",
+                "explicacion": "Consumo elevado detectado en oficinas fuera del horario laboral. Revisar que los computadores, impresoras y sistemas de aire acondicionado estén apagados.",
+                "ahorro_estimado": impact * 0.75,
+                "confianza": 0.85
+            }
+        elif sector == "Laboratorios":
+             rec = {
+                "accion": "Revisar equipos especializados y sistemas de ventilación en laboratorios.",
+                "explicacion": "Los laboratorios muestran un consumo anómalo. Verificar que los equipos de alta demanda y los sistemas de extracción de aire no estén operando innecesariamente.",
+                "ahorro_estimado": impact * 0.6,
+                "confianza": 0.8
+            }
+
+    return rec
+
+
+@app.post("/generate-recommendation/{anomaly_id}", response_model=GenerateRecommendationResponse, tags=["Recommendation Engine"])
+def generate_recommendation_endpoint(anomaly_id: int):
+    """
+    Generates and stores a recommendation for a given anomaly ID.
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # 1. Fetch anomaly details
+        cur.execute("SELECT * FROM anomalies.detected WHERE id = %s;", (anomaly_id,))
+        anomaly = cur.fetchone()
+
+        if not anomaly:
+            raise HTTPException(status_code=404, detail=f"Anomaly with ID {anomaly_id} not found.")
+
+        # 2. Generate recommendation logic
+        recommendation_logic = _create_recommendation_logic(anomaly)
+
+        # 3. Store the new recommendation in the database
+        insert_query = """
+            INSERT INTO recommendations.generated
+            (anomaly_id, sede_id, sector, timestamp, tipo_anomalia, accion, ahorro_estimado, explicacion, confianza, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING id;
+        """
+        cur.execute(
+            insert_query,
+            (
+                anomaly_id,
+                anomaly["sede_id"],
+                anomaly["sector"],
+                anomaly["timestamp"],
+                anomaly["tipo"],
+                recommendation_logic["accion"],
+                recommendation_logic["ahorro_estimado"],
+                recommendation_logic["explicacion"],
+                recommendation_logic["confianza"],
+            ),
+        )
+        new_recommendation_id = cur.fetchone()["id"]
+        conn.commit()
+
+        return GenerateRecommendationResponse(
+            message="Recommendation generated successfully.",
+            recommendation_id=new_recommendation_id,
+            anomaly_id=anomaly_id,
+            accion=recommendation_logic["accion"],
+            ahorro_estimado=recommendation_logic["ahorro_estimado"],
+            explicacion=recommendation_logic["explicacion"],
+        )
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Error during recommendation generation: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    finally:
+        if conn:
+            cur.close()
+            conn.close()
+
