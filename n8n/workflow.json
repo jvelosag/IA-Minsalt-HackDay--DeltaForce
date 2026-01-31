@@ -1,0 +1,100 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "312a8237-88c6-4987-89cd-b7b6bfaa1566",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    timestamp, \n    sede_id, \n    energia_salones_kwh AS consumo, \n    temperatura_exterior_c, \n    ocupacion_pct, \n    hora, \n    dia_semana, \n    mes, \n    ano, \n    es_festivo \nFROM raw_data.consumo \nWHERE UPPER(sede_id) = 'UPTC_TUN' \nORDER BY timestamp DESC \nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        208,
+        0
+      ],
+      "id": "7091ef5b-1318-4a99-bc94-b93930a38c30",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "0LDusGWHFE2NOBO2",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://ia-core:8000/predict/UPTC_TUN/Salones",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"timestamp\": \"{{ new Date().toISOString() }}\",\n  \"temperatura_exterior_c\": {{ $json.temperatura_exterior_c }},\n  \"ocupacion_pct\": {{ $json.ocupacion_pct }},\n  \"periodo_academico\": \"semestre_1\",\n  \"hora\": {{ $json.hora }},\n  \"dia_semana\": {{ $json.dia_semana }},\n  \"mes\": {{ $json.mes }},\n  \"trimestre\": {{ Math.floor(($json.mes - 1) / 3) + 1 }},\n  \"ano\": {{ $json.ano }},\n  \"es_fin_semana\": {{ ($json.dia_semana === 0 || $json.dia_semana === 6) ? true : false }},\n  \"es_festivo\": {{ $json.es_festivo }},\n  \"es_semana_parciales\": false,\n  \"es_semana_finales\": false\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "26d9280c-7a41-4a39-8870-8daf2f99320c",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "b009b507-6198-4273-9909-f42bb4a4e26d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "85fd28b23a77a6b973a2ff4b0ef7dbdda4e12450a77518f6eef98b066d3c6834"
+  },
+  "id": "Kg9sg2UJbNo97h-la9ejW",
+  "tags": []
+}
